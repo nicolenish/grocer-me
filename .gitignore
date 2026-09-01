@@ -1,0 +1,40 @@
+# --- Secrets -----------------------------------------------------------------
+.env
+.env.local
+
+# Saved browser session for the store adapter: live cookies for a real,
+# logged-in account. Never commit.
+.weee_session/
+*_session/
+
+# --- Local data --------------------------------------------------------------
+# The dev database holds real recipes, pantry contents and order history.
+# The bare name is not enough: timestamped backups sit beside it.
+db.sqlite3
+db.sqlite3*
+*.sqlite3
+*.sqlite3.bak-*
+
+# --- Python ------------------------------------------------------------------
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# --- Node / Vite -------------------------------------------------------------
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# --- Local tooling -----------------------------------------------------------
+.claude/
+.qodo/
+
+# --- OS / editor -------------------------------------------------------------
+.DS_Store
+.vscode/
+.idea/
+*.log
