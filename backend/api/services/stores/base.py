@@ -34,6 +34,9 @@ class StoreAdapter(Protocol):
     #: Shown in the UI.
     label: str
 
+    #: Where the filled cart can be opened, so checkout stays in your hands.
+    cart_url: str
+
     def check_login_status(self) -> dict:
         """-> {"logged_in": bool, "message": str}"""
         ...

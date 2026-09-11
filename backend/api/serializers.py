@@ -29,7 +29,3 @@ class GroceryListSerializer(serializers.Serializer):
 
 class ParseRequestSerializer(serializers.Serializer):
     urls = serializers.ListField(child=serializers.URLField())
-
-
-class MergeRequestSerializer(serializers.Serializer):
-    recipe_ids = serializers.ListField(child=serializers.CharField())

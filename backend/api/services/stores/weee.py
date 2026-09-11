@@ -23,6 +23,8 @@ class WeeeStore:
     name = "weee"
     label = "Weee!"
 
+    cart_url = "https://www.sayweee.com/en/cart"
+
     SEARCH_URL = "https://www.sayweee.com/en/search?keyword={query}"
     HOME_URL = "https://www.sayweee.com/en"
 

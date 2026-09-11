@@ -29,6 +29,9 @@ class SavedRecipe(models.Model):
 class WeeklyPlan(models.Model):
     week_of = models.DateField()
     recipes = models.ManyToManyField(SavedRecipe, through="WeeklyPlanRecipe")
+    # [[recipe_id, multiplier], ...] the saved grocery list was merged from, so
+    # the list can tell when the plan has moved on without it.
+    merged_from_json = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -41,6 +44,8 @@ class WeeklyPlan(models.Model):
 class WeeklyPlanRecipe(models.Model):
     plan = models.ForeignKey(WeeklyPlan, on_delete=models.CASCADE, related_name="plan_recipes")
     recipe = models.ForeignKey(SavedRecipe, on_delete=models.CASCADE, related_name="weekly_uses")
+    # Servings multiplier for this week only; the merge scales quantities by it.
+    multiplier = models.FloatField(default=1.0)
 
     class Meta:
         unique_together = ("plan", "recipe")
@@ -73,6 +78,8 @@ class WeeklyGroceryItem(models.Model):
     unit = models.CharField(max_length=100, blank=True, default="")
     category = models.CharField(max_length=50, default="other")
     checked = models.BooleanField(default=False)
+    # Which of the merge's recipes asked for this item, by position.
+    recipe_indices = models.JSONField(default=list)
 
     class Meta:
         ordering = ["category", "name"]
@@ -87,6 +94,39 @@ class WeeklyGroceryItem(models.Model):
             "unit": self.unit,
             "category": self.category,
             "checked": self.checked,
+            "recipe_indices": self.recipe_indices,
+        }
+
+
+class CartRun(models.Model):
+    """One push of a week's list into the store's cart.
+
+    Kept so a week can still say how its shopping went ("11 of 13 in the
+    cart") and which items the store couldn't match, after the browser that
+    did the work has closed.
+    """
+
+    plan = models.ForeignKey(WeeklyPlan, on_delete=models.CASCADE, related_name="cart_runs")
+    store = models.CharField(max_length=50)
+    added = models.PositiveIntegerField(default=0)
+    total = models.PositiveIntegerField(default=0)
+    unmatched_json = models.JSONField(default=list)  # [{"name", "status", "message"}]
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.store} {self.added}/{self.total} ({self.plan.week_of})"
+
+    def to_dict(self):
+        return {
+            "id": self.pk,
+            "store": self.store,
+            "added": self.added,
+            "total": self.total,
+            "unmatched": self.unmatched_json,
+            "created_at": self.created_at.isoformat(),
         }
 
 
