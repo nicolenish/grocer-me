@@ -1,126 +1,76 @@
-import { useState, useEffect, useRef } from "react";
-import type { Recipe, GroceryItem, WeeeLoginStatus, WeeeCartResult } from "./types";
-import { getWeeeLoginStatus } from "./api";
-import { planningWeek } from "./utils";
-import RecipeInput from "./components/RecipeInput";
-import GroceryList from "./components/GroceryList";
-import WeeeCart from "./components/WeeeCart";
-import History from "./components/History";
-import Fridge from "./components/Fridge";
-import WeekPicker from "./components/WeekPicker";
-import "./index.css";
-
-const STEPS = [
-  { key: "recipes", label: "Recipes", icon: "📝" },
-  { key: "grocery", label: "Grocery List", icon: "🛒" },
-  { key: "weee", label: "Weee!", icon: "🚀" },
-  { key: "fridge", label: "Fridge", icon: "🧊" },
-  { key: "history", label: "History", icon: "📚" },
-] as const;
-
-type Step = (typeof STEPS)[number]["key"];
+import { useEffect, useState } from "react";
+import type { PlannedRecipe } from "./types";
+import { useWeekBoard } from "./useWeekBoard";
+import { addWeeks, planningWeek } from "./utils";
+import Spine, { type View } from "./components/Spine";
+import WeekBoard from "./components/WeekBoard";
+import ListRail from "./components/ListRail";
+import Rotation from "./components/Rotation";
+import SearchOverlay from "./components/SearchOverlay";
+import CookMode from "./components/CookMode";
 
 function App() {
-  const [currentStep, setCurrentStep] = useState<Step>("recipes");
-  const [weekOf, setWeekOf] = useState<string>(() => planningWeek());
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [groceryItems, setGroceryItems] = useState<GroceryItem[]>([]);
-  const [recipeNames, setRecipeNames] = useState<string[]>([]);
-  const [multipliers, setMultipliers] = useState<Record<string, number>>({});
-  const [weeeLoginStatus, setWeeeLoginStatus] = useState<WeeeLoginStatus | null>(null);
-  const [weeeResults, setWeeeResults] = useState<WeeeCartResult[]>([]);
-  const [weeeMessage, setWeeeMessage] = useState<string | null>(null);
-  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
-  const didCheckWeee = useRef(false);
+  const [view, setView] = useState<View>("week");
+  const [focus, setFocus] = useState(planningWeek);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [cooking, setCooking] = useState<PlannedRecipe | null>(null);
+  const board = useWeekBoard(focus);
 
   useEffect(() => {
-    if (didCheckWeee.current) return;
-    didCheckWeee.current = true;
-    getWeeeLoginStatus()
-      .then(setWeeeLoginStatus)
-      .catch(() => setWeeeLoginStatus({ logged_in: false, message: "Could not check" }));
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      } else if (e.key === "Escape") {
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const handleLoadFromHistory = (loaded: Recipe[]) => {
-    setRecipes((prev) => [...prev, ...loaded]);
-    setCurrentStep("recipes");
+  const next = addWeeks(focus, 1);
+  const planned = new Set(
+    board.weeks
+      .filter((w) => w.week_of === focus || w.week_of === next)
+      .flatMap((w) => w.recipes.map((r) => r.id)),
+  );
+  const bringBackTo = planningWeek();
+
+  // Both ways of adding from outside the board land you back on it, so you
+  // can see where the recipe went.
+  const addAndShow = async (dbId: number, week: string) => {
+    await board.add(dbId, week);
+    setView("week");
   };
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>
-          <span className="logo-icon">🥬</span> grocer me
-        </h1>
-        <p>paste recipes. get groceries. skip the thinking.</p>
-      </header>
+      <Spine view={view} onView={setView} onSearch={() => setSearchOpen(true)} />
 
-      <nav className="step-nav">
-        {STEPS.map((step) => (
-          <button
-            key={step.key}
-            className={`step-tab ${currentStep === step.key ? "active" : ""}`}
-            onClick={() => setCurrentStep(step.key)}
-          >
-            <span className="step-icon">{step.icon}</span>
-            <span className="step-label">{step.label}</span>
-            {step.key === "recipes" && recipes.length > 0 && (
-              <span className="badge">{recipes.length}</span>
-            )}
-            {step.key === "grocery" && groceryItems.length > 0 && (
-              <span className="badge">{groceryItems.length}</span>
-            )}
-          </button>
-        ))}
-      </nav>
+      {/* Both views stay mounted so a cart run or a merge survives switching. */}
+      <div className="view" hidden={view !== "week"}>
+        <WeekBoard
+          focus={focus}
+          setFocus={setFocus}
+          board={board}
+          keysActive={view === "week" && !searchOpen && !cooking}
+          onCook={setCooking}
+        />
+        <ListRail focus={focus} week={board.weeks.find((w) => w.week_of === focus)} board={board} />
+      </div>
+      <div className="view" hidden={view !== "rotation"}>
+        <Rotation
+          active={view === "rotation"}
+          bringBackTo={bringBackTo}
+          onBringBack={(dbId) => addAndShow(dbId, bringBackTo)}
+        />
+      </div>
 
-      {(currentStep === "recipes" || currentStep === "grocery") && (
-        <WeekPicker weekOf={weekOf} setWeekOf={setWeekOf} />
+      {searchOpen && (
+        <SearchOverlay focus={focus} planned={planned} onAdd={addAndShow} onClose={() => setSearchOpen(false)} />
       )}
-
-      <main className="main-content">
-        {currentStep === "recipes" && (
-          <RecipeInput
-            recipes={recipes}
-            setRecipes={setRecipes}
-            multipliers={multipliers}
-            setMultipliers={setMultipliers}
-            weekOf={weekOf}
-            onNext={() => setCurrentStep("grocery")}
-            onOpenHistory={() => setCurrentStep("history")}
-          />
-        )}
-        {currentStep === "grocery" && (
-          <GroceryList
-            recipes={recipes}
-            groceryItems={groceryItems}
-            setGroceryItems={setGroceryItems}
-            recipeNames={recipeNames}
-            setRecipeNames={setRecipeNames}
-            multipliers={multipliers}
-            weekOf={weekOf}
-            checked={checkedItems}
-            setChecked={setCheckedItems}
-            onNext={() => setCurrentStep("weee")}
-          />
-        )}
-        {currentStep === "weee" && (
-          <WeeeCart
-            groceryItems={groceryItems}
-            checked={checkedItems}
-            loginStatus={weeeLoginStatus}
-            setLoginStatus={setWeeeLoginStatus}
-            results={weeeResults}
-            setResults={setWeeeResults}
-            message={weeeMessage}
-            setMessage={setWeeeMessage}
-          />
-        )}
-        {currentStep === "fridge" && <Fridge />}
-        {currentStep === "history" && (
-          <History onLoadRecipes={handleLoadFromHistory} weekOf={weekOf} />
-        )}
-      </main>
+      {cooking && <CookMode recipe={cooking} onClose={() => setCooking(null)} />}
     </div>
   );
 }

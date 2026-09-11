@@ -1,73 +1,25 @@
 import axios from "axios";
-import type { Recipe, GroceryList, GroceryItem, WeeeCartResponse, WeeeLoginStatus, WeeklyPlan, SavedRecipe, PantryItem, ParseResult, WatchlistItem } from "./types";
+import type {
+  CartResponse,
+  GroceryItem,
+  GroceryList,
+  PantryItem,
+  ParseResult,
+  Rotation,
+  SavedRecipe,
+  StoreStatus,
+  WatchlistItem,
+  Week,
+} from "./types";
 
 const api = axios.create({
   baseURL: "http://localhost:8000",
 });
 
-export async function parseRecipes(urls: string[], weekOf?: string): Promise<ParseResult> {
+// Recipes
+
+export async function parseRecipes(urls: string[], weekOf: string): Promise<ParseResult> {
   const response = await api.post<ParseResult>("/api/recipes/parse/", { urls, week_of: weekOf });
-  return response.data;
-}
-
-export async function mergeGroceryList(
-  recipeIds: string[],
-  multipliers?: Record<string, number>,
-  weekOf?: string
-): Promise<GroceryList> {
-  const response = await api.post<GroceryList>("/api/grocery-list/merge/", {
-    recipe_ids: recipeIds,
-    multipliers: multipliers ?? {},
-    week_of: weekOf,
-  });
-  return response.data;
-}
-
-export async function getCurrentGroceryList(weekOf?: string): Promise<GroceryList | null> {
-  try {
-    const response = await api.get<GroceryList>("/api/grocery-list/current/", {
-      params: weekOf ? { week_of: weekOf } : undefined,
-    });
-    return response.data;
-  } catch {
-    return null;
-  }
-}
-
-export async function updateGroceryList(items: GroceryItem[]): Promise<GroceryList> {
-  const response = await api.post<GroceryList>("/api/grocery-list/update/", {
-    items,
-  });
-  return response.data;
-}
-
-export async function getWeeeLoginStatus(): Promise<WeeeLoginStatus> {
-  const response = await api.get<WeeeLoginStatus>("/api/weee/login-status/");
-  return response.data;
-}
-
-export async function weeeLogin(): Promise<WeeeLoginStatus> {
-  const response = await api.post<WeeeLoginStatus>("/api/weee/login/");
-  return response.data;
-}
-
-export async function addToWeeeCart(items: GroceryItem[]): Promise<WeeeCartResponse> {
-  const response = await api.post<WeeeCartResponse>("/api/weee/add-to-cart/", {
-    items,
-  });
-  return response.data;
-}
-
-export async function listWeeklyPlans(): Promise<WeeklyPlan[]> {
-  const response = await api.get<WeeklyPlan[]>("/api/plans/");
-  return response.data;
-}
-
-export async function saveWeeklyPlan(recipeIds: string[], weekOf?: string): Promise<{ id: number; week_of: string; recipe_count: number }> {
-  const response = await api.post("/api/plans/save/", {
-    recipe_ids: recipeIds,
-    week_of: weekOf,
-  });
   return response.data;
 }
 
@@ -78,16 +30,51 @@ export async function listSavedRecipes(q?: string): Promise<SavedRecipe[]> {
   return response.data;
 }
 
-export async function loadSavedRecipes(dbIds: number[], weekOf?: string): Promise<Recipe[]> {
-  const response = await api.post<Recipe[]>("/api/recipes/load/", { db_ids: dbIds, week_of: weekOf });
+// Weeks
+
+export async function listWeeks(start: string, count: number): Promise<Week[]> {
+  const response = await api.get<Week[]>("/api/weeks/", { params: { start, count } });
   return response.data;
 }
 
-export async function removeRecipeFromPlan(dbId: number, weekOf?: string): Promise<void> {
+export async function addRecipeToWeek(dbId: number, weekOf: string): Promise<void> {
+  await api.post("/api/plans/add-recipe/", { db_id: dbId, week_of: weekOf });
+}
+
+/** Moves between upcoming weeks; copies out of a week that's already over. */
+export async function moveRecipe(dbId: number, fromWeek: string, toWeek: string): Promise<void> {
+  await api.post("/api/plans/move-recipe/", { db_id: dbId, from_week: fromWeek, to_week: toWeek });
+}
+
+export async function setMultiplier(dbId: number, weekOf: string, multiplier: number): Promise<void> {
+  await api.post("/api/plans/set-multiplier/", { db_id: dbId, week_of: weekOf, multiplier });
+}
+
+export async function removeRecipeFromPlan(dbId: number, weekOf: string): Promise<void> {
   await api.post("/api/plans/remove-recipe/", { db_id: dbId, week_of: weekOf });
 }
 
-// Pantry
+// The week's list
+
+export async function getGroceryList(weekOf: string): Promise<GroceryList> {
+  const response = await api.get<GroceryList>("/api/grocery-list/current/", {
+    params: { week_of: weekOf },
+  });
+  return response.data;
+}
+
+/** Re-merge the week's list from its plan. This is the call that costs a model request. */
+export async function mergeWeek(weekOf: string): Promise<GroceryList> {
+  const response = await api.post<GroceryList>("/api/grocery-list/merge/", { week_of: weekOf });
+  return response.data;
+}
+
+export async function checkGroceryItem(weekOf: string, name: string, checked: boolean): Promise<void> {
+  await api.post("/api/grocery-list/check/", { week_of: weekOf, name, checked });
+}
+
+// Already home
+
 export async function listPantry(): Promise<PantryItem[]> {
   const response = await api.get<PantryItem[]>("/api/pantry/");
   return response.data;
@@ -98,21 +85,13 @@ export async function addPantryItem(name: string, category?: string): Promise<Pa
   return response.data;
 }
 
-export async function addPantryItemsBulk(items: { name: string; category?: string }[]): Promise<PantryItem[]> {
-  const response = await api.post<PantryItem[]>("/api/pantry/bulk-add/", { items });
-  return response.data;
-}
-
 export async function updatePantryItem(id: number, data: Partial<PantryItem>): Promise<PantryItem> {
   const response = await api.patch<PantryItem>(`/api/pantry/${id}/`, data);
   return response.data;
 }
 
-export async function deletePantryItem(id: number): Promise<void> {
-  await api.delete(`/api/pantry/${id}/delete/`);
-}
+// On the shelf
 
-// Watchlist
 export async function listWatchlist(): Promise<WatchlistItem[]> {
   const response = await api.get<WatchlistItem[]>("/api/watchlist/");
   return response.data;
@@ -125,4 +104,28 @@ export async function addToWatchlist(urls: string[]): Promise<{ added: Watchlist
 
 export async function removeFromWatchlist(id: number): Promise<void> {
   await api.delete(`/api/watchlist/${id}/delete/`);
+}
+
+// Store
+
+export async function getStoreStatus(): Promise<StoreStatus> {
+  const response = await api.get<StoreStatus>("/api/weee/login-status/");
+  return response.data;
+}
+
+export async function storeLogin(): Promise<StoreStatus> {
+  const response = await api.post<StoreStatus>("/api/weee/login/");
+  return response.data;
+}
+
+export async function fillCart(items: GroceryItem[], weekOf: string): Promise<CartResponse> {
+  const response = await api.post<CartResponse>("/api/weee/add-to-cart/", { items, week_of: weekOf });
+  return response.data;
+}
+
+// Rotation
+
+export async function getRotation(weeks = 26): Promise<Rotation> {
+  const response = await api.get<Rotation>("/api/analytics/rotation/", { params: { weeks } });
+  return response.data;
 }

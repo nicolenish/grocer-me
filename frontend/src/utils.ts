@@ -1,3 +1,5 @@
+import axios from "axios";
+
 const SMALL_WORDS = new Set([
   "a", "an", "the", "and", "but", "or", "for", "nor",
   "on", "at", "to", "by", "of", "in", "with", "from",
@@ -13,6 +15,11 @@ function toISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function fromISODate(iso: string, plusDays = 0): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d + plusDays);
+}
+
 /** Monday of the week containing `d` (defaults to today), as an ISO date string. */
 export function mondayOf(d: Date = new Date()): string {
   const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -22,48 +29,90 @@ export function mondayOf(d: Date = new Date()): string {
 }
 
 /**
- * The week to default to when planning. Meal-planning happens on Thursday for
- * the *following* week, so from Thursday onward we default to next week; Mon–Wed
- * still default to the current (in-progress) week.
+ * The week being planned: always the upcoming one. Recipes get pulled for next
+ * week, never for the week already underway, whatever day it is today.
  */
 export function planningWeek(d: Date = new Date()): string {
-  const dow = (d.getDay() + 6) % 7; // 0 = Monday … 6 = Sunday
-  const thisMonday = mondayOf(d);
-  return dow >= 3 ? addWeeks(thisMonday, 1) : thisMonday; // Thu(3)–Sun(6) → next week
+  return addWeeks(mondayOf(d), 1);
 }
 
 /** Shift an ISO Monday by a number of weeks. */
 export function addWeeks(isoMonday: string, weeks: number): string {
-  const [y, m, d] = isoMonday.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + weeks * 7);
-  return toISODate(dt);
+  return toISODate(fromISODate(isoMonday, weeks * 7));
 }
 
-/** Human label for a Monday-week, e.g. "Jul 13 – 19" or "Jun 30 – Jul 6". */
-export function formatWeekRange(isoMonday: string): string {
-  const [y, m, d] = isoMonday.split("-").map(Number);
-  const start = new Date(y, m - 1, d);
-  const end = new Date(y, m - 1, d + 6);
-  const mon = (dt: Date) => dt.toLocaleString("en-US", { month: "short" });
-  if (start.getMonth() === end.getMonth()) {
-    return `${mon(start)} ${start.getDate()} – ${end.getDate()}`;
+/** "Sep 7" for an ISO date, optionally shifted ("Sep 13" is the Sunday of that week). */
+export function shortDate(iso: string, plusDays = 0): string {
+  const dt = fromISODate(iso, plusDays);
+  return `${dt.toLocaleString("en-US", { month: "short" })} ${dt.getDate()}`;
+}
+
+/** Whole weeks from this week to `isoMonday`; negative in the past. */
+export function weeksFromNow(isoMonday: string): number {
+  const diff = fromISODate(isoMonday).getTime() - fromISODate(mondayOf()).getTime();
+  return Math.round(diff / (7 * 86400000));
+}
+
+/** Short tag for a week relative to now: "now", "next", "last", "in 3 wks", "5 wks ago". */
+export function weekTag(isoMonday: string): string {
+  const n = weeksFromNow(isoMonday);
+  if (n === 0) return "now";
+  if (n === 1) return "next";
+  if (n === -1) return "last";
+  return n > 1 ? `in ${n} wks` : `${-n} wks ago`;
+}
+
+/** A week before this one is history: dragging out of it copies instead of moving. */
+export function isPastWeek(isoMonday: string): boolean {
+  return isoMonday < mondayOf();
+}
+
+// ───── Formatting ─────
+
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
   }
-  return `${mon(start)} ${start.getDate()} – ${mon(end)} ${end.getDate()}`;
 }
 
-/** Relative descriptor for a Monday-week vs. the current week: "This week", "Next week", etc. */
-export function weekRelativeLabel(isoMonday: string): string {
-  const thisMonday = mondayOf();
-  const diffDays = Math.round(
-    (new Date(isoMonday).getTime() - new Date(thisMonday).getTime()) / 86400000
-  );
-  const weeks = Math.round(diffDays / 7);
-  if (weeks === 0) return "This week";
-  if (weeks === 1) return "Next week";
-  if (weeks === -1) return "Last week";
-  if (weeks > 1) return `In ${weeks} weeks`;
-  return `${Math.abs(weeks)} weeks ago`;
+/** "seriouseats.com/mapo-tofu" — enough of a URL to recognise it. */
+export function shortUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return (u.hostname.replace(/^www\./, "") + u.pathname).replace(/\/$/, "");
+  } catch {
+    return url;
+  }
+}
+
+export function boughtAgo(iso: string | null): string {
+  if (!iso) return "never tracked";
+  const days = Math.floor((Date.now() - fromISODate(iso).getTime()) / 86400000);
+  if (days <= 0) return "bought today";
+  if (days === 1) return "bought yesterday";
+  if (days < 7) return `bought ${days} days ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return weeks === 1 ? "bought 1 week ago" : `bought ${weeks} weeks ago`;
+  const months = Math.floor(days / 30);
+  return months <= 1 ? "bought 1 month ago" : `bought ${months} months ago`;
+}
+
+export const pad2 = (n: number) => String(n).padStart(2, "0");
+
+export const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+export const percent = (share: number) => `${Math.round(share * 100)}%`;
+
+/** The backend's own explanation when it gave one, otherwise something readable. */
+export function errorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) {
+    const detail = (err.response?.data as { detail?: unknown } | undefined)?.detail;
+    if (typeof detail === "string") return detail;
+    if (!err.response) return "Can't reach the backend on :8000 — is it running?";
+  }
+  return fallback;
 }
 
 export function titleCase(s: string): string {
