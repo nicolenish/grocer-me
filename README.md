@@ -1,11 +1,11 @@
 # grocer me
 
-Paste the recipes you want to cook this week. Get back one shopping list — deduplicated, quantities summed, sorted by aisle, and then let it fill the cart for you.
+Paste the recipes you want to cook next week. Get back one shopping list — deduplicated, quantities summed, sorted by aisle, and then let it fill the cart for you.
 
 The tedious part of cooking from recipes is never the cooking, it's figuring out if you 
 have all the ingredients, in the correct quantities across 6 different tabs.
 
-![grocer me — the week's recipes go in as URLs](grocer-me.png)
+![grocer me — four weeks side by side, the one being planned in the middle and its merged list on the right](grocer-me.png)
 
 ## How it works
 
@@ -29,9 +29,20 @@ later can subtract exactly its share.
 **Fill** (`api/services/stores/`) drives a real browser to put the list in a
 cart. See below.
 
-Around that: a weekly planner, a pantry ("what's already in the fridge?") that
-gets subtracted from the list, a watchlist for recipes to try later, saved plan
-history, and a cook mode that keeps one recipe on screen at a time.
+Around that: a week board with four weeks side by side, where recipes drag from
+one week to another; a pantry ("already home") that gets subtracted from the
+list; a shelf for recipes to try later; ⌘K search over everything you've
+cooked; and a cook mode that keeps one recipe on screen at a time.
+
+![⌘K search over everything you've cooked, by name or ingredient](grocer-me-search.png)
+
+**Rotation** (`api/services/rotation.py`) looks back over the last 26 weeks of
+plans: how many dinners, how many distinct recipes, which ones come round more
+than once a month, the protein mix, and which old favourites have gone cold and
+could come back. A recipe on a week's plan counts as a dinner; the app never
+learns what actually got cooked, so the plan is the record.
+
+![Rotation — times cooked against a once-a-month line, concentration, protein mix, and what's gone cold](grocer-me-rotation.png)
 
 ## Store adapters
 
@@ -42,6 +53,7 @@ any particular retailer, that all lives behind one interface:
 class StoreAdapter(Protocol):
     name: str
     label: str
+    cart_url: str
     def check_login_status(self) -> dict: ...
     def open_login_page(self) -> dict: ...
     def add_items_to_cart(self, items: list[dict]) -> dict: ...
@@ -90,11 +102,11 @@ Django 4.2 + DRF, React 18 + Vite + TypeScript, SQLite, Playwright, and the
 Anthropic API for the merge step.
 
 ```
-backend/api/services/     parse, merge, and the store adapters
+backend/api/services/     parse, merge, rotation, and the store adapters
 backend/api/models.py     SavedRecipe, WeeklyPlan, WeeklyGroceryItem,
-                          PantryItem, WatchlistUrl
-frontend/src/components/  RecipeInput, GroceryList, Fridge, WeeeCart,
-                          CookMode, History, WeekPicker
+                          PantryItem, WatchlistUrl, CartRun
+frontend/src/components/  WeekBoard, ListRail, CartPanel, Rotation,
+                          SearchOverlay, CookMode, Spine
 ```
 
 ## Notes
