@@ -118,7 +118,7 @@ function App() {
         )}
         {currentStep === "fridge" && <Fridge />}
         {currentStep === "history" && (
-          <History onLoadRecipes={handleLoadFromHistory} />
+          <History onLoadRecipes={handleLoadFromHistory} weekOf={weekOf} />
         )}
       </main>
     </div>

@@ -62,6 +62,38 @@ def _scale_quantity(qty: str, multiplier: float) -> str:
         return qty
 
 
+def _refresh_saved_recipe(saved: SavedRecipe, parsed: dict) -> list[str]:
+    """Upgrade an already-saved recipe from a fresh parse.
+
+    get_or_create only populates a new row, so a recipe first saved from a
+    blocked or half-parsed page would keep that bad title and empty ingredient
+    list forever, even after a later scrape succeeded. Take the new values
+    whenever they are better than what is stored, and leave the rest alone.
+    """
+    updates = []
+
+    # An empty ingredient list means the stored copy came from a failed scrape.
+    if not saved.ingredients_json and parsed.get("ingredients"):
+        saved.ingredients_json = parsed["ingredients"]
+        updates.append("ingredients_json")
+        # That same scrape produced the title, so it is suspect too.
+        if parsed.get("title") and parsed["title"] != saved.title:
+            saved.title = parsed["title"]
+            updates.append("title")
+
+    if not saved.instructions_json and parsed.get("instructions"):
+        saved.instructions_json = parsed["instructions"]
+        updates.append("instructions_json")
+
+    if not saved.servings and parsed.get("servings"):
+        saved.servings = parsed["servings"]
+        updates.append("servings")
+
+    if updates:
+        saved.save(update_fields=updates)
+    return updates
+
+
 def _auto_add_to_week(saved_recipe: SavedRecipe, week_of=None):
     week_of = week_of or _get_week_start()
     plan, _ = WeeklyPlan.objects.get_or_create(week_of=week_of)
@@ -98,10 +130,8 @@ def parse_recipes(request):
                     "servings": recipe.get("servings"),
                 },
             )
-            # Backfill instructions if previously saved without them
-            if not created and not saved.instructions_json and recipe.get("instructions"):
-                saved.instructions_json = recipe["instructions"]
-                saved.save(update_fields=["instructions_json"])
+            if not created:
+                _refresh_saved_recipe(saved, recipe)
             recipe["db_id"] = saved.pk
 
             _auto_add_to_week(saved, week_of)
@@ -110,13 +140,9 @@ def parse_recipes(request):
         except Exception as e:
             errors.append({"url": url, "error": str(e)})
 
-    if not parsed_recipes and errors:
-        return Response(
-            {"detail": f"Failed to parse all recipes: {errors}"},
-            status=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        )
-
-    # Return both successes and per-URL errors so the frontend can show partial failures
+    # Always 200 with both lists, even when every URL failed: this is a batch
+    # operation, and an error status makes the client discard the per-URL
+    # messages in favour of a bare "request failed" string.
     return Response({"recipes": parsed_recipes, "errors": errors})
 
 
@@ -359,6 +385,30 @@ def save_weekly_plan(request):
     })
 
 
+@api_view(["POST"])
+def remove_recipe_from_plan(request):
+    """Take a recipe off a week's plan.
+
+    Recipes are attached to a week as soon as they are scraped or loaded, so
+    dropping one from the menu has to delete the link row too — otherwise it
+    silently stays on the plan and reappears in History and the grocery list.
+    """
+    db_id = request.data.get("db_id")
+    if db_id in (None, ""):
+        return Response({"detail": "db_id required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    week_of = _parse_week_of(request.data.get("week_of"))
+    plan = WeeklyPlan.objects.filter(week_of=week_of).first()
+    if not plan:
+        return Response({"status": "not_on_plan", "week_of": week_of.isoformat()})
+
+    deleted, _ = WeeklyPlanRecipe.objects.filter(plan=plan, recipe_id=db_id).delete()
+    return Response({
+        "status": "removed" if deleted else "not_on_plan",
+        "week_of": plan.week_of.isoformat(),
+    })
+
+
 @api_view(["GET"])
 def list_weekly_plans(request):
     plans = WeeklyPlan.objects.prefetch_related("recipes", "grocery_items").all()
@@ -407,6 +457,7 @@ def load_saved_recipes(request):
     if not db_ids:
         return Response({"detail": "No recipe IDs provided"}, status=status.HTTP_400_BAD_REQUEST)
 
+    week_of = _parse_week_of(request.data.get("week_of"))
     loaded = []
     for db_id in db_ids:
         try:
@@ -426,7 +477,7 @@ def load_saved_recipes(request):
         }
         recipe_store[session_id] = recipe
 
-        _auto_add_to_week(saved)
+        _auto_add_to_week(saved, week_of)
 
         loaded.append(recipe)
 

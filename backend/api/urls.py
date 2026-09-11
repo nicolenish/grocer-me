@@ -13,6 +13,7 @@ urlpatterns = [
     path('grocery-list/', views.get_grocery_list),
     path('plans/', views.list_weekly_plans),
     path('plans/save/', views.save_weekly_plan),
+    path('plans/remove-recipe/', views.remove_recipe_from_plan),
     path('plans/<int:plan_id>/groceries/', views.get_plan_grocery_list),
     path('pantry/', views.list_pantry),
     path('pantry/add/', views.add_pantry_item),

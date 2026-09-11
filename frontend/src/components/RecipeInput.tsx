@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import type { Recipe, ParseError, WatchlistItem } from "../types";
-import { parseRecipes, listWatchlist, addToWatchlist, removeFromWatchlist } from "../api";
+import type { Recipe, ParseError, WatchlistItem, SavedRecipe } from "../types";
+import { parseRecipes, listWatchlist, addToWatchlist, removeFromWatchlist, removeRecipeFromPlan, listSavedRecipes, loadSavedRecipes } from "../api";
 import CookMode from "./CookMode";
 
 const RECIPE_COLORS = [
@@ -35,6 +35,10 @@ export default function RecipeInput({
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [savingWatchlist, setSavingWatchlist] = useState(false);
   const [promotingId, setPromotingId] = useState<number | null>(null);
+  const [pastQuery, setPastQuery] = useState("");
+  const [pastResults, setPastResults] = useState<SavedRecipe[]>([]);
+  const [searchingPast, setSearchingPast] = useState(false);
+  const [addingPastId, setAddingPastId] = useState<number | null>(null);
   const didLoadWatchlist = useRef(false);
 
   useEffect(() => {
@@ -42,6 +46,26 @@ export default function RecipeInput({
     didLoadWatchlist.current = true;
     listWatchlist().then(setWatchlist).catch(() => {});
   }, []);
+
+  // Search saved recipes as the user types, debounced so each keystroke
+  // doesn't fire its own request.
+  useEffect(() => {
+    const q = pastQuery.trim();
+    if (!q) {
+      setPastResults([]);
+      setSearchingPast(false);
+      return;
+    }
+    setSearchingPast(true);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      listSavedRecipes(q)
+        .then((found) => { if (!cancelled) setPastResults(found); })
+        .catch(() => { if (!cancelled) setPastResults([]); })
+        .finally(() => { if (!cancelled) setSearchingPast(false); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [pastQuery]);
 
   const getMultiplier = (id: string) => multipliers[id] ?? 1;
   const setMultiplier = (id: string, val: number) => {
@@ -122,9 +146,29 @@ export default function RecipeInput({
     setWatchlist((prev) => prev.filter((w) => w.id !== id));
   };
 
-  const handleRemove = (id: string) => {
-    setRecipes((prev) => prev.filter((r) => r.id !== id));
-    setMultipliers((prev) => { const next = { ...prev }; delete next[id]; return next; });
+  const handleAddPast = async (saved: SavedRecipe) => {
+    setAddingPastId(saved.id);
+    try {
+      const loaded = await loadSavedRecipes([saved.id], weekOf);
+      setRecipes((prev) => {
+        const existingUrls = new Set(prev.map((r) => r.source_url));
+        return [...prev, ...loaded.filter((r) => !existingUrls.has(r.source_url))];
+      });
+    } catch {
+      setParseErrors([{ url: saved.source_url, error: "Could not add that recipe." }]);
+    } finally {
+      setAddingPastId(null);
+    }
+  };
+
+  const handleRemove = async (recipe: Recipe) => {
+    setRecipes((prev) => prev.filter((r) => r.id !== recipe.id));
+    setMultipliers((prev) => { const next = { ...prev }; delete next[recipe.id]; return next; });
+    // The recipe was attached to this week the moment it was scraped or loaded,
+    // so it has to come off the saved plan as well as the on-screen list.
+    if (recipe.db_id !== undefined) {
+      await removeRecipeFromPlan(recipe.db_id, weekOf).catch(() => {});
+    }
   };
 
   return (
@@ -156,6 +200,69 @@ export default function RecipeInput({
             📚 Past Recipes
           </button>
         </div>
+      </div>
+
+      {/* Search what you've cooked before, without leaving this tab */}
+      <div className="past-search">
+        <div className="past-search-label">
+          <span>or add from recipes you've cooked before</span>
+        </div>
+        <div className="search-bar">
+          <input
+            type="text"
+            placeholder="🔍 Search past recipes by name or ingredient..."
+            value={pastQuery}
+            onChange={(e) => setPastQuery(e.target.value)}
+            className="search-input"
+          />
+          {pastQuery && (
+            <button
+              onClick={() => setPastQuery("")}
+              className="search-clear"
+              title="Clear search"
+            >✕</button>
+          )}
+        </div>
+
+        {pastQuery.trim() && (
+          <div className="past-results">
+            {searchingPast && pastResults.length === 0 && (
+              <p className="past-results-empty"><span className="spinner" /> Searching…</p>
+            )}
+            {!searchingPast && pastResults.length === 0 && (
+              <p className="past-results-empty">
+                Nothing saved matches “{pastQuery.trim()}”.
+              </p>
+            )}
+            {pastResults.map((saved) => {
+              const onMenu = recipes.some((r) => r.source_url === saved.source_url);
+              let host = "";
+              try { host = new URL(saved.source_url).hostname; } catch {}
+              return (
+                <div key={saved.id} className="past-result">
+                  <div className="past-result-info">
+                    <span className="past-result-title">{saved.title}</span>
+                    <span className="past-result-meta">
+                      {host}
+                      {saved.ingredients.length > 0 && ` · ${saved.ingredients.length} ingredients`}
+                    </span>
+                  </div>
+                  {onMenu ? (
+                    <span className="past-result-on-menu">✓ on the menu</span>
+                  ) : (
+                    <button
+                      onClick={() => handleAddPast(saved)}
+                      disabled={addingPastId !== null}
+                      className="btn-secondary btn-sm"
+                    >
+                      {addingPastId === saved.id ? "Adding…" : "+ Add"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {parseErrors.length > 0 && (
@@ -221,7 +328,7 @@ export default function RecipeInput({
                     <button onClick={() => setCookingRecipe(recipe)} className="btn-cook" title="Cook this recipe">
                       👨‍🍳 Cook
                     </button>
-                    <button onClick={() => handleRemove(recipe.id)} className="btn-remove" title="Remove recipe">✕</button>
+                    <button onClick={() => handleRemove(recipe)} className="btn-remove" title="Remove recipe">✕</button>
                   </div>
                 </div>
                 <ul className="ingredient-list">

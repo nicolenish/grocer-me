@@ -1,3 +1,4 @@
+import html
 import json
 import re
 from typing import Optional
@@ -337,13 +338,37 @@ def extract_recipe_heuristic(soup: BeautifulSoup) -> tuple[list[str], list[str]]
     return ingredients, instructions
 
 
+def _decode(text: str) -> str:
+    """Decode HTML entities in scraped text.
+
+    Text pulled via BeautifulSoup's get_text() is already decoded, but JSON-LD
+    carries whatever the site embedded in its JSON — often raw entities like
+    "&amp;" or "&#8217;", which would otherwise be stored and rendered literally.
+    """
+    if not isinstance(text, str):
+        return text
+    return html.unescape(text)
+
+
 def _clean_title(title: Optional[str]) -> str:
     """Strip the trailing "| Site Name" / "— Site Name" suffix builder sites add."""
     if not title:
         return "Unknown Recipe"
     parts = re.split(r"\s*[|–—·]\s*", title)
     cleaned = parts[0].strip() if parts and parts[0].strip() else title.strip()
-    return re.sub(r"\s+", " ", cleaned)
+    # Decode after splitting: an entity-encoded dash would otherwise turn into a
+    # separator and truncate a legitimate title.
+    return _decode(re.sub(r"\s+", " ", cleaned))
+
+
+# Titles served by bot walls and error pages. These parse "successfully" into a
+# recipe with no ingredients, so name them to give a useful error.
+_BLOCK_PAGE_TITLE_RE = re.compile(
+    r"^(attention required|just a moment|access denied|forbidden|"
+    r"are you a robot|security check|verify you are human|"
+    r"\d{3}\s|error\b|blocked)",
+    re.IGNORECASE,
+)
 
 
 def _fetch_with_httpx(url: str) -> str:
@@ -422,7 +447,28 @@ def fetch_and_parse_recipe(url: str) -> dict:
     title = _clean_title(title)
 
     # Parse each ingredient string into structured data
-    ingredients = [parse_quantity_unit_name(ing) for ing in raw_ingredients if isinstance(ing, str)]
+    ingredients = [
+        parse_quantity_unit_name(_decode(ing))
+        for ing in raw_ingredients
+        if isinstance(ing, str)
+    ]
+    instructions = [_decode(step) for step in instructions if isinstance(step, str)]
+    if isinstance(servings, str):
+        servings = _decode(servings)
+
+    # A recipe with no ingredients is a failed scrape, not a recipe. Saving one
+    # poisons the grocery list and the recipe history, so fail loudly instead —
+    # the caller reports this per-URL and nothing gets written.
+    if not ingredients:
+        if _BLOCK_PAGE_TITLE_RE.match(title):
+            raise ValueError(
+                "The site blocked the request (bot protection). Try opening the "
+                "page in your browser and saving it for later."
+            )
+        raise ValueError(
+            "No ingredients found on that page — it may not be a recipe, or the "
+            "recipe may be behind a login or paywall."
+        )
 
     recipe_id = str(uuid4())
     return {

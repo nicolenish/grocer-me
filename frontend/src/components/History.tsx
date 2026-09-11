@@ -11,6 +11,8 @@ const RECIPE_COLORS = [
 
 interface Props {
   onLoadRecipes: (recipes: Recipe[]) => void;
+  /** The week currently being planned — loaded recipes get attached to it. */
+  weekOf: string;
 }
 
 function formatWeekLabel(weekOf: string): string {
@@ -32,7 +34,7 @@ function timeAgo(iso: string): string {
   return `${weeks} weeks ago`;
 }
 
-export default function History({ onLoadRecipes }: Props) {
+export default function History({ onLoadRecipes, weekOf }: Props) {
   const [plans, setPlans] = useState<WeeklyPlan[]>([]);
   const [allRecipes, setAllRecipes] = useState<SavedRecipe[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +66,8 @@ export default function History({ onLoadRecipes }: Props) {
 
   const handleSearch = async (q: string) => {
     setSearchQuery(q);
+    // The search covers saved recipes, so show that list as soon as they type.
+    if (q.trim()) setView("recipes");
     try {
       const recipesData = await listSavedRecipes(q || undefined);
       setAllRecipes(recipesData);
@@ -83,7 +87,7 @@ export default function History({ onLoadRecipes }: Props) {
     if (selectedRecipeIds.size === 0) return;
     setLoadingId("bulk");
     try {
-      const loaded = await loadSavedRecipes(Array.from(selectedRecipeIds));
+      const loaded = await loadSavedRecipes(Array.from(selectedRecipeIds), weekOf);
       onLoadRecipes(loaded);
       setSelectedRecipeIds(new Set());
     } catch { /* */ }
@@ -93,7 +97,7 @@ export default function History({ onLoadRecipes }: Props) {
   const handleLoadSingle = async (recipeId: number) => {
     setLoadingId(recipeId);
     try {
-      const loaded = await loadSavedRecipes([recipeId]);
+      const loaded = await loadSavedRecipes([recipeId], weekOf);
       onLoadRecipes(loaded);
     } catch { /* */ }
     finally { setLoadingId(null); }
@@ -103,7 +107,7 @@ export default function History({ onLoadRecipes }: Props) {
     setLoadingId(`week-${plan.id}`);
     try {
       const dbIds = plan.recipes.map((r) => r.id);
-      const loaded = await loadSavedRecipes(dbIds);
+      const loaded = await loadSavedRecipes(dbIds, weekOf);
       onLoadRecipes(loaded);
     } catch { /* */ }
     finally { setLoadingId(null); }
@@ -140,6 +144,23 @@ export default function History({ onLoadRecipes }: Props) {
         </div>
       ) : (
         <>
+          <div className="search-bar">
+            <input
+              type="text"
+              placeholder={`🔍 Search all ${allRecipes.length} recipes by name or ingredient...`}
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="search-input"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => handleSearch("")}
+                className="search-clear"
+                title="Clear search"
+              >✕</button>
+            )}
+          </div>
+
           <div className="history-tabs">
             <button
               className={`history-tab ${view === "weeks" ? "active" : ""}`}
@@ -208,16 +229,6 @@ export default function History({ onLoadRecipes }: Props) {
             </div>
           ) : (
             <div className="all-recipes-view">
-              <div className="search-bar">
-                <input
-                  type="text"
-                  placeholder="Search recipes..."
-                  value={searchQuery}
-                  onChange={(e) => handleSearch(e.target.value)}
-                  className="search-input"
-                />
-              </div>
-
               {selectedRecipeIds.size > 0 && (
                 <div className="selection-bar">
                   <span>{selectedRecipeIds.size} selected</span>

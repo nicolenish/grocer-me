@@ -78,9 +78,13 @@ export async function listSavedRecipes(q?: string): Promise<SavedRecipe[]> {
   return response.data;
 }
 
-export async function loadSavedRecipes(dbIds: number[]): Promise<Recipe[]> {
-  const response = await api.post<Recipe[]>("/api/recipes/load/", { db_ids: dbIds });
+export async function loadSavedRecipes(dbIds: number[], weekOf?: string): Promise<Recipe[]> {
+  const response = await api.post<Recipe[]>("/api/recipes/load/", { db_ids: dbIds, week_of: weekOf });
   return response.data;
+}
+
+export async function removeRecipeFromPlan(dbId: number, weekOf?: string): Promise<void> {
+  await api.post("/api/plans/remove-recipe/", { db_id: dbId, week_of: weekOf });
 }
 
 // Pantry
