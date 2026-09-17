@@ -59,12 +59,17 @@ class StoreAdapter(Protocol):
     def add_items_to_cart(self, items: list[dict]) -> dict: ...
 ```
 
-One adapter ships, for [Weee!](https://www.sayweee.com) (`stores/weee.py`).
+One adapter ships, for [Weee!](https://www.weee.com) (`stores/weee.py`).
 There's no public API, so it drives Playwright: you log in by hand once, the
 session is saved as browser storage state, and later runs reuse the cookies.
 The fiddliest part is that the add-to-cart button is `width: 0` until its
 product card is hovered, so the adapter hovers the card's container before
 clicking.
+
+Knowing whether you're still signed in takes asking the site: the header is
+identical signed in or out, and a signed-out visitor is handed an auth cookie
+too. So the adapter opens the account page and watches for a bounce to the
+login form, and a cart run stops there rather than filling a signed-out cart.
 
 Adding another store means adding a file to `stores/` and registering it — no
 changes anywhere else. Pick one with `GROCER_STORE`.
@@ -87,14 +92,15 @@ python -m playwright install chromium
 ./run.sh                      # backend :8000, frontend :5173
 ```
 
-Then, once, to hand the store adapter a session:
+Then, once, to hand the store adapter a session — the **Sign in to Weee!**
+button in the app does the same thing:
 
 ```bash
 curl -X POST http://localhost:8000/api/weee/login/
 ```
 
-That opens a browser. Log in, press enter in the terminal, and the session is
-saved to a gitignored directory.
+That opens a browser on the sign-in page. Log in there; the session saves
+itself to a gitignored directory as soon as the site says you're through.
 
 ## Stack
 
