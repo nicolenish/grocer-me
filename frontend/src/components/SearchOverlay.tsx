@@ -70,8 +70,20 @@ export default function SearchOverlay({ focus, planned, onAdd, onClose }: Props)
                   {planned.has(r.id) ? " · already planned" : ""}
                 </div>
               </div>
-              <button className="search-btn" onClick={() => add(r.id, focus)}>→ {shortDate(focus)}</button>
-              <button className="search-btn search-btn--accent" onClick={() => add(r.id, next)}>→ {shortDate(next)}</button>
+              <button
+                className="search-btn search-btn--accent"
+                onClick={() => add(r.id, focus)}
+                title={`Add to the week you're planning (${shortDate(focus)})`}
+              >
+                → {shortDate(focus)}
+              </button>
+              <button
+                className="search-btn"
+                onClick={() => add(r.id, next)}
+                title={`Add to the week after (${shortDate(next)})`}
+              >
+                → {shortDate(next)}
+              </button>
             </div>
           ))}
         </div>
